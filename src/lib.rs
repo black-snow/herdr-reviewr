@@ -1717,8 +1717,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent, area: Rect, keymap: &Keymap) -> 
     // A key resolving to no action falls through to the fixed keys below
     // (`tab`, `esc`), which stay hardcoded per context.
     let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     let code = match key.code {
-        Char(c) => Some(keymap::KeyCode::Char(c)),
+        // The terminal delivers the shifted character (`shift+1` arrives as `!`), so match
+        // the unshifted base: a `shift+1` binding answers either encoding the terminal uses.
+        Char(c) => Some(keymap::KeyCode::Char(if shift { keymap::unshifted(c) } else { c })),
         Left => Some(keymap::KeyCode::Left),
         Right => Some(keymap::KeyCode::Right),
         Up => Some(keymap::KeyCode::Up),
@@ -1727,7 +1730,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent, area: Rect, keymap: &Keymap) -> 
         PageDown => Some(keymap::KeyCode::PageDown),
         _ => None,
     };
-    let action = code.and_then(|code| keymap.action_for(crate::keymap::Key { ctrl, alt, code }));
+    let action =
+        code.and_then(|code| keymap.action_for(crate::keymap::Key { ctrl, alt, shift, code }));
 
     // An armed crossing waits for a repeat of the hunk step that armed it. Every other key drops
     // it, and still does its own work. The steps themselves settle their arm in

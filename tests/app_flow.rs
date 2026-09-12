@@ -1642,7 +1642,7 @@ fn page_down_rebinds_and_half_page_defaults_hold() {
 
     let keymap = Keymap::resolve(&[(
         Action::PageDown,
-        vec![Key { ctrl: true, alt: false, code: BindingCode::Char('n') }],
+        vec![Key { ctrl: true, alt: false, shift: false, code: BindingCode::Char('n') }],
     )])
     .unwrap();
     app.diff_cursor = 0;
@@ -3898,7 +3898,7 @@ fn find_opens_on_a_rebound_alt_chord_through_the_dispatcher() {
     let mut app = app_on(&r);
     let keymap = Keymap::resolve(&[(
         Action::Find,
-        vec![Key { ctrl: false, alt: true, code: BindingCode::Char('x') }],
+        vec![Key { ctrl: false, alt: true, shift: false, code: BindingCode::Char('x') }],
     )])
     .unwrap();
     app.focus = Focus::Diff;
@@ -5430,16 +5430,20 @@ fn the_picker_owns_its_keys_on_every_tab() {
     let area = Rect::new(0, 0, 80, 24);
 
     // The picker is checked before the tab handlers, so no tab can eat a modal's keys. On the
-    // read-only PR tab, `q` quits and the digits switch tabs — both would act behind an open
+    // read-only PR tab, `q` quits and the tab chords switch tabs — both would act behind an open
     // picker if the modal were checked second.
     let mut app = app_with_picker(&r);
     app.tab = Tab::Pr;
     handle_key(&mut app, KeyEvent::from(KeyCode::Char('q')), area, &keymap).unwrap();
     assert!(!app.should_quit, "`q` quit the app from a picker on the PR tab");
     assert_eq!(app.mode, Mode::Picker, "`q` left the picker");
-    handle_key(&mut app, KeyEvent::from(KeyCode::Char('1')), area, &keymap).unwrap();
-    assert_eq!(app.tab, Tab::Pr, "`1` switched tabs behind the picker");
-    assert_eq!(app.picker_cursor, 0, "`1` moved the highlight, as the picker's own key");
+    handle_key(&mut app, KeyEvent::new(KeyCode::Char('1'), KeyModifiers::SHIFT), area, &keymap)
+        .unwrap();
+    assert_eq!(app.tab, Tab::Pr, "`shift+1` switched tabs behind the picker");
+    assert_eq!(
+        app.picker_cursor, 0,
+        "`shift+1` is inert: the chord moved neither the tab nor the highlight"
+    );
     handle_key(&mut app, KeyEvent::from(KeyCode::Esc), area, &keymap).unwrap();
     assert_eq!(app.mode, Mode::Normal, "`esc` still cancels from the PR tab");
 }
@@ -5476,9 +5480,16 @@ fn the_picker_digits_are_literal_whatever_the_tab_keys_are_bound_to() {
     let area = Rect::new(0, 0, 80, 24);
     let tab_before = app.tab;
 
+    // The tab keys are now `shift+` chords. A chord carrying a digit is inert in the
+    // picker — it must not switch tabs (the modal owns the key) and, per the picker's
+    // own rule, must not move the highlight either.
+    handle_key(&mut app, KeyEvent::new(KeyCode::Char('2'), KeyModifiers::SHIFT), area, &keymap)
+        .unwrap();
+    assert_eq!(app.picker_cursor, 0, "`shift+2` did not move the highlight");
+    assert_eq!(app.tab, tab_before, "`shift+2` did not switch tabs from inside the picker");
+    // The bare digits remain the picker's literal row keys.
     handle_key(&mut app, KeyEvent::from(KeyCode::Char('2')), area, &keymap).unwrap();
-    assert_eq!(app.picker_cursor, 1, "`2` moved the highlight to row 2");
-    assert_eq!(app.tab, tab_before, "`2` did not switch tabs from inside the picker");
+    assert_eq!(app.picker_cursor, 1, "bare `2` moved the highlight to row 2");
 }
 
 #[test]
@@ -7186,6 +7197,7 @@ fn every_other_key_is_inert_inside_the_commit_picker() {
     let mut app = app_on(&r);
     let keymap = Keymap::default();
     press(&mut app, &keymap, KeyCode::Char('G'));
+    let area = Rect::new(0, 0, 120, 40);
     for code in [
         KeyCode::Char('q'),
         KeyCode::Char('/'),
@@ -7210,6 +7222,14 @@ fn every_other_key_is_inert_inside_the_commit_picker() {
         assert_eq!(app.scope, Scope::Uncommitted);
         assert!(!app.should_quit);
         assert!(!app.keys_expanded);
+    }
+    // The tab chords are the keys that would change the tab if the modal didn't own them.
+    for c in ['1', '2', '3'] {
+        handle_key(&mut app, KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT), area, &keymap)
+            .unwrap();
+        assert_eq!(app.mode, Mode::CommitPick, "`shift+{c}` is inert");
+        assert_eq!(app.tab, herdr_reviewr::app::Tab::Changes);
+        assert!(!app.should_quit);
     }
     handle_key(
         &mut app,
