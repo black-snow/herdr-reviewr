@@ -4,6 +4,7 @@
 mod common;
 
 use std::cell::RefCell;
+use std::fmt::Write;
 use std::path::Path;
 
 use anyhow::{Result, bail};
@@ -71,6 +72,117 @@ fn clamp(app: &mut App, viewport: usize) {
     let heights = vec![1usize; app.visible.len()];
     app.reveal_diff_cursor(&heights, viewport);
     app.bound_diff_scroll(&heights, viewport);
+}
+
+/// A repo whose `a.rs` runs 20 lines and had line 15 edited, so the open diff
+/// shows the hunk around line 15 — enough numbered rows to jump within, past,
+/// and before.
+fn tall_repo() -> Repo {
+    let r = Repo::init();
+    let body: String = (1..=20).fold(String::new(), |mut s, i| {
+        let _ = writeln!(s, "line{i}");
+        s
+    });
+    r.write("a.rs", &body);
+    r.commit_all("init");
+    r.write("a.rs", &body.replace("line15\n", "LINE15\n"));
+    r
+}
+
+fn key(app: &mut App, c: char) {
+    handle_key(app, KeyEvent::from(KeyCode::Char(c)), Rect::new(0, 0, 80, 24), &Keymap::default())
+        .unwrap();
+}
+
+fn key_tab(app: &mut App) {
+    handle_key(app, KeyEvent::from(KeyCode::Tab), Rect::new(0, 0, 80, 24), &Keymap::default())
+        .unwrap();
+}
+
+#[test]
+fn digits_then_g_jump_to_the_named_line() {
+    let r = tall_repo();
+    let mut app = app_on(&r);
+    key_tab(&mut app); // the read pane must own the keys
+    key(&mut app, '1');
+    key(&mut app, '5');
+    key(&mut app, 'g');
+    assert_eq!(app.visible[app.diff_cursor].new_no(), Some(15));
+}
+
+#[test]
+fn a_jump_into_a_collapsed_fold_expands_it_and_lands_on_the_named_line() {
+    let r = Repo::init();
+    let body: String = (1..=100).fold(String::new(), |mut s, i| {
+        let _ = writeln!(s, "line{i}");
+        s
+    });
+    r.write("a.rs", &body);
+    r.commit_all("init");
+    r.write("a.rs", &body.replace("line15\n", "LINE15\n")); // hunk at 15 folds the run above
+    let mut app = app_on(&r);
+    key_tab(&mut app);
+    key(&mut app, '7'); // line 7 sits inside the collapsed fold
+    key(&mut app, 'g');
+    assert_eq!(
+        app.visible[app.diff_cursor].new_no(),
+        Some(7),
+        "the fold must expand to reveal line 7"
+    );
+}
+
+#[test]
+fn a_jump_past_the_last_numbered_line_clamps_to_the_last_row() {
+    let r = tall_repo();
+    let mut app = app_on(&r);
+    key_tab(&mut app);
+    key(&mut app, '9');
+    key(&mut app, '9');
+    key(&mut app, 'g');
+    assert_eq!(app.diff_cursor, app.visible.len() - 1);
+    // The last row is the tail fold — its marker sits at the first hidden line's number,
+    // past every numbered row.
+    assert_eq!(app.visible[app.diff_cursor].fold_anchor(), Some(19));
+}
+
+#[test]
+fn a_digit_prefix_drops_when_any_other_key_follows() {
+    let r = tall_repo();
+    let mut app = app_on(&r);
+    key_tab(&mut app);
+    let before = app.diff_cursor;
+    key(&mut app, '5');
+    key(&mut app, 'j'); // the other key drops the prefix, then runs itself
+    assert_eq!(app.diff_cursor, before + 1, "no jump — `j` just moved a row");
+    key(&mut app, 'g'); // no prefix left: the bare `g` scope switch runs
+    assert!(app.commit_picker.is_some(), "the bare `g` did its scope switch");
+}
+
+#[test]
+fn digits_are_inert_in_the_files_pane() {
+    let r = tall_repo();
+    let mut app = app_on(&r);
+    assert_eq!(app.focus, Focus::Files);
+    key(&mut app, '5');
+    assert_eq!(app.line_count, 0, "digits do not accumulate in the files pane");
+}
+
+#[test]
+fn a_line_jump_is_inert_while_the_markdown_preview_is_open() {
+    let r = Repo::init();
+    r.write("a.md", "# title\n");
+    r.commit_all("init");
+    r.write("a.md", "# title\n\nbody\n");
+    let mut app = app_on(&r);
+    app.focus = Focus::Diff;
+    app.toggle_preview();
+    assert!(app.preview_active(), "the markdown preview is open");
+    let cursor = app.diff_cursor;
+    key(&mut app, '2');
+    key(&mut app, 'g');
+    assert_eq!(app.diff_cursor, cursor, "the preview has no cursor to land on");
+    assert!(app.preview_active());
+    assert!(app.commit_picker.is_none(), "the prefix is consumed; no scope switch");
 }
 
 #[test]

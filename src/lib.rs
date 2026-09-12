@@ -1858,6 +1858,21 @@ pub fn handle_key(app: &mut App, key: KeyEvent, area: Rect, keymap: &Keymap) -> 
         return Ok(());
     }
 
+    // The line-jump prefix: bare digits with the read pane focused accumulate a line
+    // number, consumed by the `g` binding. Every other key drops the prefix first —
+    // including any key that opens a modal — so a prefix never leaks into a modal
+    // or a later `g`. Digits in the files pane are inert and do not accumulate.
+    let count = app.line_count;
+    app.line_count = 0;
+    if app.focus == Focus::Diff
+        && !ctrl
+        && !alt
+        && let KeyCode::Char(c) = key.code
+        && c.is_ascii_digit()
+    {
+        app.line_count = count.saturating_mul(10).saturating_add(c.to_digit(10).unwrap());
+        return Ok(());
+    }
     if let Some(action) = action {
         match action {
             K::Quit => app.should_quit = true,
@@ -1899,6 +1914,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent, area: Rect, keymap: &Keymap) -> 
             K::ScopeUncommitted => app.set_scope(Scope::Uncommitted)?,
             K::ScopeBranch => app.set_scope(Scope::Branch)?,
             K::ScopeLastTurn => app.set_scope(Scope::LastTurn)?,
+            K::ScopeCommits if count > 0 => app.jump_to_line(count),
             K::ScopeCommits => app.set_scope(Scope::Commits)?,
             K::BasePick => app.open_base_picker(),
             K::CommitPick => app.open_commit_picker(),
