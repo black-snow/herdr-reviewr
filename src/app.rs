@@ -3754,20 +3754,11 @@ impl App {
         }
         let mut pos = 0u32;
         for (i, row) in self.visible.iter().enumerate() {
-            let row_pos = match row {
-                r @ (Row::Context { .. } | Row::Insertion { .. }) => r.new_no().unwrap(),
-                Row::Fold { .. } => row.fold_anchor().unwrap_or(pos),
-                Row::Deletion { .. } => pos,
-            };
-            if row_pos >= n {
-                // No visible row at `N`: the first visible row numbered `>= n` is the landing.
-                self.diff_cursor = i;
-                self.reveal_diff = true;
-                return;
-            }
-            // `N` is hidden inside this fold: expand it and land on the revealed line — the
+            // `N` hidden inside this fold: expand it and land on the revealed line — the
             // same escape the find band uses. Folds hold dense context runs, so `N` is in
-            // the fold exactly when the last hidden number reaches it.
+            // the fold exactly when its last hidden number reaches it. Checked before the
+            // landing pass: a fold whose first hidden line is `N` would otherwise satisfy
+            // the `>= n` landing below and strand the cursor on the unnumbered marker.
             if let Row::Fold { lines } = row
                 && let Some(end) = lines.last().and_then(Row::new_no)
                 && end >= n
@@ -3778,6 +3769,17 @@ impl App {
                 }
                 self.diff_cursor =
                     self.visible.iter().position(|r| r.new_no() == Some(n)).unwrap_or(i);
+                self.reveal_diff = true;
+                return;
+            }
+            let row_pos = match row {
+                r @ (Row::Context { .. } | Row::Insertion { .. }) => r.new_no().unwrap(),
+                Row::Fold { .. } => row.fold_anchor().unwrap_or(pos),
+                Row::Deletion { .. } => pos,
+            };
+            if row_pos >= n {
+                // No visible row at `N`: the first visible row numbered `>= n` is the landing.
+                self.diff_cursor = i;
                 self.reveal_diff = true;
                 return;
             }

@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 use common::{Repo, app_on, enter_tab, typed};
-use herdr_reviewr::app::{App, Band, Focus, FooterAction, Mode};
+use herdr_reviewr::app::{App, Band, Focus, FooterAction, Mode, Tab};
 use herdr_reviewr::config::NavigatorPosition;
 use herdr_reviewr::export::ExportTarget;
 use herdr_reviewr::herdr::{AgentChoice, AgentSample};
@@ -89,6 +89,20 @@ fn tall_repo() -> Repo {
     r
 }
 
+/// A repo whose `a.rs` runs 70 lines and had line 60 edited — long enough to jump to line 60
+/// exactly, and far enough past line 1 that line 1 sits in the collapsed head fold.
+fn long_repo() -> Repo {
+    let r = Repo::init();
+    let body: String = (1..=70).fold(String::new(), |mut s, i| {
+        let _ = writeln!(s, "line{i}");
+        s
+    });
+    r.write("a.rs", &body);
+    r.commit_all("init");
+    r.write("a.rs", &body.replace("line60\n", "LINE60\n"));
+    r
+}
+
 fn key(app: &mut App, c: char) {
     handle_key(app, KeyEvent::from(KeyCode::Char(c)), Rect::new(0, 0, 80, 24), &Keymap::default())
         .unwrap();
@@ -108,6 +122,35 @@ fn digits_then_g_jump_to_the_named_line() {
     key(&mut app, '5');
     key(&mut app, 'g');
     assert_eq!(app.visible[app.diff_cursor].new_no(), Some(15));
+}
+
+#[test]
+fn sixty_g_jumps_to_line_sixty() {
+    let r = long_repo();
+    let mut app = app_on(&r);
+    key_tab(&mut app);
+    key(&mut app, '6');
+    key(&mut app, '0');
+    key(&mut app, 'g');
+    assert_eq!(app.visible[app.diff_cursor].new_no(), Some(60));
+}
+
+#[test]
+fn one_g_jumps_to_the_first_line() {
+    let r = long_repo();
+    let mut app = app_on(&r);
+    key_tab(&mut app);
+    key(&mut app, '1');
+    key(&mut app, 'g');
+    assert_eq!(app.visible[app.diff_cursor].new_no(), Some(1));
+}
+
+#[test]
+fn a_bare_g_with_no_pending_prefix_switches_the_scope() {
+    let r = tall_repo();
+    let mut app = app_on(&r);
+    key(&mut app, 'g');
+    assert!(app.commit_picker.is_some(), "the bare `g` did its scope switch");
 }
 
 #[test]
@@ -165,6 +208,17 @@ fn digits_are_inert_in_the_files_pane() {
     assert_eq!(app.focus, Focus::Files);
     key(&mut app, '5');
     assert_eq!(app.line_count, 0, "digits do not accumulate in the files pane");
+}
+
+#[test]
+fn a_shift_tagged_digit_is_a_chord_not_a_jump_digit() {
+    let r = tall_repo();
+    let mut app = app_on(&r);
+    key_tab(&mut app); // focus the diff pane, where bare digits buffer
+    let event = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::SHIFT);
+    handle_key(&mut app, event, Rect::new(0, 0, 80, 24), &Keymap::default()).unwrap();
+    assert_eq!(app.line_count, 0, "a tagged shift+digit must not buffer into the prefix");
+    assert_eq!(app.tab, Tab::AllFiles, "and it must fire the tab chord");
 }
 
 #[test]
@@ -7301,6 +7355,66 @@ fn a_single_pick_reopens_without_an_anchor_so_k_enter_steps() {
     press(&mut app, &keymap, KeyCode::Enter);
     assert_eq!(app.commit_pick, Some(herdr_reviewr::model::CommitPick::single(&shas[2])));
     assert_eq!(changed_paths(&app), ["two.rs"]);
+}
+
+/// A shifted glyph reaches the app in two encodings: tagged with the `SHIFT` modifier
+/// (kitty-protocol terminals) and bare (legacy xterm sends `!` for `shift+1` with no
+/// modifier at all). Both must answer the tab chords, and the bare spelling of a
+/// bare-bound glyph (`?`) still answers its own binding in either encoding. The bare
+/// list spans layouts: US `!`/`@`/`#` and the `"`/`§` a German (or British, French,
+/// Spanish) keyboard generates for `shift+2`/`shift+3`.
+#[test]
+fn shifted_glyphs_answer_in_both_terminal_encodings() {
+    let repo = Repo::init();
+    repo.write("a.rs", "one\n");
+    repo.commit_all("c");
+    let keymap = Keymap::default();
+    let area = Rect::new(0, 0, 80, 24);
+
+    for (glyph, tab) in [
+        ('!', herdr_reviewr::app::Tab::Changes),
+        ('@', herdr_reviewr::app::Tab::AllFiles),
+        ('"', herdr_reviewr::app::Tab::AllFiles),
+        ('#', herdr_reviewr::app::Tab::Pr),
+        ('§', herdr_reviewr::app::Tab::Pr),
+    ] {
+        for mods in [KeyModifiers::NONE, KeyModifiers::SHIFT] {
+            let mut app = app_on(&repo);
+            handle_key(&mut app, KeyEvent::new(KeyCode::Char(glyph), mods), area, &keymap).unwrap();
+            assert_eq!(app.tab, tab, "`{glyph}` as {mods:?} must answer the tab chord");
+        }
+    }
+
+    for mods in [KeyModifiers::NONE, KeyModifiers::SHIFT] {
+        let mut app = app_on(&repo);
+        handle_key(&mut app, KeyEvent::new(KeyCode::Char('?'), mods), area, &keymap).unwrap();
+        assert!(app.keys_expanded, "`?` as {mods:?} must open the key list");
+    }
+}
+
+/// The layout-shifted digit glyphs are chords in Normal mode, but under the composer they
+/// are the characters the reviewer is typing: a German `shift+2` quote or `shift+3`
+/// section sign lands in the draft, and the tab stays put.
+#[test]
+fn layout_shifted_digit_glyphs_type_while_composing() {
+    let mut app = composing_app();
+    let keymap = Keymap::default();
+    let area = Rect::new(0, 0, 80, 24);
+    for glyph in ['"', '§'] {
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char(glyph), KeyModifiers::NONE),
+            area,
+            &keymap,
+        )
+        .unwrap();
+        assert!(app.input.ends_with(glyph), "`{glyph}` types into the draft");
+    }
+    assert_eq!(
+        app.tab,
+        herdr_reviewr::app::Tab::Changes,
+        "the chord did not fire under the composer"
+    );
 }
 
 #[test]

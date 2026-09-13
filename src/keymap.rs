@@ -239,14 +239,17 @@ impl Action {
 
 /// The base character a terminal delivers for `shift`+`ch`: `!` comes from `1`, `A`
 /// from `a`. The dispatcher runs every shifted character through this before matching,
-/// so a `shift+1` binding answers the `!` the terminal reports. Characters with no
-/// shifted form (digits, lowercase, non-ASCII) map to themselves.
+/// so a `shift+1` binding answers the `!` the terminal reports. The digit forms
+/// include the layout-shifted glyphs a legacy (level 0) terminal reports instead of a
+/// tagged key: US `@`/`#` and the `"`/`§` of German, British, French, and Spanish
+/// layouts, so the `shift+digit` tab chords answer on any of them. Characters with
+/// no shifted form (digits, lowercase, the rest of non-ASCII) map to themselves.
 pub fn unshifted(ch: char) -> char {
     match ch {
         'A'..='Z' => ch.to_ascii_lowercase(),
         '!' => '1',
-        '@' => '2',
-        '#' => '3',
+        '@' | '"' => '2',
+        '#' | '§' => '3',
         '$' => '4',
         '%' => '5',
         '^' => '6',
@@ -260,7 +263,8 @@ pub fn unshifted(ch: char) -> char {
         '}' => ']',
         '|' => '\\',
         ':' => ';',
-        '"' => '\'',
+        // The US `"` (shift+quote) is unreachable here: the German/British/French
+        // `"` (shift+2) claims the glyph, and no `shift+quote` chord is bound.
         '<' => ',',
         '>' => '.',
         '?' => '/',
@@ -478,6 +482,12 @@ mod tests {
         assert_eq!(unshifted('A'), 'a');
         assert_eq!(unshifted('~'), '`');
         assert_eq!(unshifted('1'), '1', "no shifted form maps to itself");
+        // Legacy terminals report the layout-shifted glyph, not a tagged key: US `@`/`#`,
+        // German/British/French/Spanish `"`/`§`.
+        assert_eq!(unshifted('@'), '2');
+        assert_eq!(unshifted('"'), '2');
+        assert_eq!(unshifted('#'), '3');
+        assert_eq!(unshifted('§'), '3');
     }
 
     #[test]
