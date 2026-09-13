@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: tab navigation moves to `shift+1`/`2`/`3`.** The bare digits are free again —
+  the pickers highlight by digit, and `Ng` line-jump accumulates any bare digit. Custom
+  `[keybindings]` for the three tab actions are unaffected; only the defaults move.
+- **`Ng` jumps to a line.** With the diff focused, a bare digit run plus `g` moves the
+  cursor to that line, expanding a fold that hides it.
+
+### Fixed
+
+- **The `shift+1`/`2`/`3` tab chords on non-US keyboard layouts.** Legacy terminals send the
+  glyph your layout generates rather than a tagged key, so on German, British, French, and
+  Spanish keyboards `shift+2`/`shift+3` arrived as `"`/`§` — unmapped, dead keys — while
+  `shift+1` (the US-shared `!`) still worked. The layout-shifted digit glyphs now answer
+  their chords, and under the comment composer they remain typeable characters.
+
 ## [0.37.1] — 2026-09-13
 
 ### Changed
