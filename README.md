@@ -161,6 +161,8 @@ jumps, and `Ctrl+W` / `Ctrl+U` / `Ctrl+K` deletes.
 | `PageUp` `PageDown` | Scroll focused pane |
 | `o` | Open PR in browser |
 | `r` | Refresh |
+| `s` | Send the selected comment to the agent |
+| `a` | Send all comments to the agent |
 
 The mouse works too. Drag over any text to select and copy it, double-click a word,
 triple-click a line. Click or drag the line-number gutter to comment. Click files, tabs, and
@@ -350,6 +352,7 @@ The action names and their defaults:
 | `find` | `ctrl+f` |
 | `keys` | `?` |
 | `send` | `s`, `S` |
+| `send-all` | `a`, `A` |
 | `copy` | `y`, `Y` |
 | `open-pr` | `o` |
 | `refresh` | `r` |
